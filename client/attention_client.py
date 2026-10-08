@@ -103,7 +103,8 @@ def main():
         else:
             color = (0, 255, 0) if attention_score >= 60 else (0, 165, 255)
             cv2.putText(frame, f"Attention: {attention_score}%", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.3, color, 3)
-            cv2.putText(frame, f"EAR: {ear_avg:.3f}  |  Yaw: {yaw:.1f}", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(frame, f"EAR: {ear_avg:.3f}  |  Yaw: {yaw:.1f}", (20, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         cv2.imshow("Attention Monitoring System", frame)
 
