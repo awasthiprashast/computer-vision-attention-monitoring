@@ -208,3 +208,11 @@ __marimo__/
 
 
 *.pem
+reports/
+*.pdf
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log

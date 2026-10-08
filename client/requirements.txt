@@ -1,0 +1,4 @@
+mediapipe==0.10.14
+opencv-contrib-python==4.13.0.92
+numpy==2.4.4
+requests==2.33.1

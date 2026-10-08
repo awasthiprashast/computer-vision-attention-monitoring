@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) and edit.
+
+# Your public IP, from https://checkip.amazonaws.com, followed by /32
+dashboard_allowed_cidr = "203.0.113.7/32"
+
+# region      = "ap-south-1"
+# repo_branch = "main"

@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-attention}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-attention}
+      POSTGRES_DB: ${POSTGRES_DB:-attentiondb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-attention} -d ${POSTGRES_DB:-attentiondb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "${DB_PORT:-5433}:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-attention}:${POSTGRES_PASSWORD:-attention}@db:5432/${POSTGRES_DB:-attentiondb}
+      API_KEY: ${API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    build: ./dashboard
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-attention}:${POSTGRES_PASSWORD:-attention}@db:5432/${POSTGRES_DB:-attentiondb}
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "8501:8501"
+
+volumes:
+  pgdata:

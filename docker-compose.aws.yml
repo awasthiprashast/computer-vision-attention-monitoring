@@ -1,0 +1,16 @@
+# Production-style stack used on the EC2 host. The database is RDS, so there is no db service.
+# Secrets and settings come from .env, which the instance writes at boot (see infra/terraform).
+services:
+  backend:
+    build: ./backend
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    build: ./dashboard
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
