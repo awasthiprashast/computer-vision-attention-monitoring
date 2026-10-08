@@ -1,0 +1,8 @@
+* text=auto
+
+# Files executed on Linux must keep LF line endings, even when checked out on Windows
+*.sh text eol=lf
+*.tpl text eol=lf
+*.tf text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
