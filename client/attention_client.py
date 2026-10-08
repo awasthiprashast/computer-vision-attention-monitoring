@@ -1,14 +1,17 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import os
 import time
 import requests
 import uuid
 
 # ========================= CONFIG =========================
-STUDENT_ID = "prashast_001"
-EC2_API_URL = "http://43.204.22.69:8000/attention"
-SEND_INTERVAL = 1.0
+# Set via environment variables (see .env.example).
+STUDENT_ID = os.environ.get("STUDENT_ID", "student_001")
+API_URL = os.environ.get("API_URL", "http://localhost:8000/attention")
+API_KEY = os.environ.get("API_KEY", "")
+SEND_INTERVAL = float(os.environ.get("SEND_INTERVAL", "1.0"))
 
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -110,7 +113,8 @@ def main():
                 "roll": 0.0
             }
             try:
-                requests.post(EC2_API_URL, json=payload, timeout=2)
+                headers = {"X-API-Key": API_KEY} if API_KEY else {}
+                requests.post(API_URL, json=payload, headers=headers, timeout=2)
                 print(f"Sent → Attention: {attention_score}% | EAR: {ear_avg:.3f} | Yaw: {yaw:.1f}")
             except:
                 print("⚠️ Could not send to backend")
