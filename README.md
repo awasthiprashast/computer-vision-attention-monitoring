@@ -16,13 +16,14 @@ direction) are sent to a cloud backend. Teachers see live trends and PDF reports
 ## Features
 
 - **Edge processing:** MediaPipe FaceMesh runs locally; the client computes the score and sends numbers only.
-- **Eye Aspect Ratio (EAR) scoring** combined with a head-direction estimate, smoothed over recent frames.
+- **Eye Aspect Ratio (EAR) scoring** combined with a head-direction estimate, smoothed over recent frames, with a
+  short **per-user calibration** at the start of each session.
 - **FastAPI backend** with validation, optional API-key authentication and a PostgreSQL time series.
 - **Streamlit dashboard** with auto-refresh, per-student filtering and summaries, and PDF reports
   (downloadable, with optional upload to S3).
 - **One-command local stack** with Docker Compose, plus a demo-data generator so you can try it without a webcam.
 - **AWS deployment as code:** Terraform for a VPC, EC2, RDS PostgreSQL, S3, IAM and SSM secrets.
-- **Tests and CI:** 23 tests, ruff linting, Terraform validation and Docker builds in GitHub Actions.
+- **Tests and CI:** 33 tests, ruff linting, Terraform validation and Docker builds in GitHub Actions.
 
 ## Architecture
 
@@ -77,7 +78,9 @@ In PowerShell:
 $env:STUDENT_ID="alice"; $env:API_URL="http://localhost:8000/attention"; python attention_client.py
 ```
 
-Press `q` in the video window to quit. If the face leaves the frame, nothing is scored or sent until it returns.
+On start the client spends about 3 seconds **calibrating**: look at the screen normally and blink as usual.
+Nothing is sent during this phase. Press `c` in the video window to recalibrate (for example after moving or
+changing the lighting) and `q` to quit. If the face leaves the frame, nothing is scored or sent until it returns.
 
 ## Configuration
 
@@ -87,6 +90,7 @@ Press `q` in the video window to quit. If the face leaves the frame, nothing is 
 | `API_URL` | client, seed script | `http://localhost:8000/attention` | Backend endpoint |
 | `API_KEY` | client, backend, seed script | empty | Shared secret sent as `X-API-Key`. Empty disables auth (development only) |
 | `SEND_INTERVAL` | client | `1.0` | Seconds between readings |
+| `CALIBRATE` | client | `1` | Set to `0` to skip calibration and use a fixed default scale |
 | `DATABASE_URL` | backend, dashboard, `scripts/db_check.py` | none (dashboard) | SQLAlchemy URL, e.g. `postgresql://user:pass@host:5432/db` |
 | `S3_BUCKET` | dashboard | empty | Enables the "Upload report to S3" button (needs AWS credentials) |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DB_PORT` | Docker Compose | `attention` / `attention` / `attentiondb` / `5433` | Local database settings |
@@ -100,8 +104,12 @@ For each frame, MediaPipe returns 478 face landmarks. The client then computes:
 
 1. **Eye Aspect Ratio (EAR)** for each eye from six landmarks: `(|p2-p6| + |p3-p5|) / (2 * |p1-p4|)`.
    It falls toward 0 as the eye closes. The two eyes are averaged.
-2. **Eye score** = `clamp(EAR * 250, 0, 100)`.
+2. **Eye score** = `clamp(EAR / your_baseline_EAR * 100, 0, 100)`, so your own normal open eyes score 100 and
+   half-closed eyes score about 50. The baseline is measured during calibration (the median over about 90
+   frames, so blinks do not skew it). With `CALIBRATE=0` it falls back to `clamp(EAR * 250, 0, 100)`.
 3. **Head score** = 100 if the head is roughly facing the screen, 40 if turned away (see limitations).
+   Calibration also records where your nose sits when you face the screen, and head direction is measured
+   from that point, so sitting off-centre does not matter.
 4. **Raw score** = `0.7 * eye score + 0.3 * head score`, then a moving average over the last 5 frames.
 
 The scoring code lives in [client/scoring.py](client/scoring.py) as plain functions, with unit tests in
@@ -162,10 +170,11 @@ More detail in [docs/privacy.md](docs/privacy.md).
 
 ## Known limitations and roadmap
 
-- **Head direction is a proxy.** "Yaw" is the nose position relative to the frame centre, not true head rotation,
-  so sitting off-centre affects it. `pitch` and `roll` are sent as 0. Proper head-pose estimation (`solvePnP`)
-  is the next scoring improvement.
-- **EAR scaling is uncalibrated.** A per-user calibration step would handle glasses, eye shape and lighting.
+- **Head direction is a proxy.** "Yaw" is the nose position relative to your calibrated neutral point, not true
+  head rotation, so it can also change if you shift sideways without turning. `pitch` and `roll` are sent as 0.
+  Proper head-pose estimation (`solvePnP`) is the next scoring improvement.
+- **Calibration is per session and assumes you calibrate while attentive.** If your eyes are half closed or you are
+  looking away during those 3 seconds, the baseline will be off. Press `c` to redo it.
 - **A student who leaves the frame produces a gap, not a low score.**
 - **AWS deployment has no HTTPS** and the dashboard has no login (it is IP-restricted). See the deployment guide.
 - The Terraform has been validated but not applied by CI.
