@@ -14,7 +14,7 @@ st.title("Computer Vision Attention Monitoring System")
 # Configuration comes from environment variables (see .env.example)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    st.error("DATABASE_URL is not set. Copy .env.example to .env and configure it.")
+    st.error("DATABASE_URL is not set. See .env.example for the expected format.")
     st.stop()
 
 # Optional: report upload is disabled when S3_BUCKET is unset
