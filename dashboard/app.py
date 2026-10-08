@@ -1,87 +1,89 @@
 import os
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-from sqlalchemy import create_engine
 from datetime import datetime
+
 import boto3
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+import plotly.express as px
+import streamlit as st
+from sqlalchemy import create_engine
+
+from data import build_report_pdf, list_students, load_records, summarize
 
 st.set_page_config(page_title="Attention Dashboard", layout="wide")
-st.title("📊 Computer Vision Attention Monitoring System")
+st.title("Computer Vision Attention Monitoring System")
 
 # Configuration comes from environment variables (see .env.example)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     st.error("DATABASE_URL is not set. Copy .env.example to .env and configure it.")
     st.stop()
-engine = create_engine(DATABASE_URL)
 
-# S3 Client (optional: report upload is disabled when S3_BUCKET is unset)
+# Optional: report upload is disabled when S3_BUCKET is unset
 BUCKET_NAME = os.environ.get("S3_BUCKET")
-s3_client = boto3.client('s3') if BUCKET_NAME else None
 
-if st.button("🔄 Refresh Data"):
-    st.rerun()
 
-df = pd.read_sql("SELECT * FROM attention_records ORDER BY timestamp DESC LIMIT 1000", engine)
-df['timestamp'] = pd.to_datetime(df['timestamp'])
+@st.cache_resource
+def get_engine():
+    return create_engine(DATABASE_URL, pool_pre_ping=True)
 
-if df.empty:
-    st.warning("No data yet. Run the client.")
-    st.stop()
 
-# Metrics
-col1, col2, col3 = st.columns(3)
-col1.metric("Avg Attention", f"{df['attention_score'].mean():.1f}%")
-col2.metric("Records", len(df))
-col3.metric("Students", df['student_id'].nunique())
+@st.cache_resource
+def get_s3_client():
+    return boto3.client("s3")
 
-# Chart
-fig = px.line(df, x='timestamp', y='attention_score', color='student_id', title="Attention Trends")
-st.plotly_chart(fig, use_container_width=True)
 
-# Generate Report Button
-if st.button("📄 Generate PDF Report" + (" & Upload to S3" if s3_client else "")):
-    with st.spinner("Generating PDF and uploading to S3..."):
+engine = get_engine()
+
+# ---- Sidebar controls ----
+with st.sidebar:
+    st.header("Controls")
+    auto_refresh = st.toggle("Auto-refresh (5s)", value=True)
+    limit = st.slider("Max records", 100, 5000, 1000, step=100)
+    try:
+        selected = st.multiselect("Students", list_students(engine), placeholder="All students")
+    except Exception as e:
+        st.error(f"Could not reach the database ({type(e).__name__}). Is it running?")
+        st.stop()
+
+
+def live_view():
+    try:
+        df = load_records(engine, selected, limit)
+    except Exception as e:
+        st.error(f"Could not load records ({type(e).__name__}).")
+        return
+
+    if df.empty:
+        st.info("No data yet. Run the client or `python scripts/seed_demo_data.py`.")
+        return
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Avg Attention", f"{df['attention_score'].mean():.1f}%")
+    col2.metric("Records", len(df))
+    col3.metric("Students", df["student_id"].nunique())
+
+    fig = px.line(df.sort_values("timestamp"), x="timestamp", y="attention_score",
+                  color="student_id", title="Attention Trends")
+    fig.update_yaxes(range=[0, 100])
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Per-student summary")
+    st.dataframe(summarize(df), use_container_width=True, hide_index=True)
+
+    st.subheader("Latest records")
+    st.dataframe(df.head(15), use_container_width=True, hide_index=True)
+
+    pdf = build_report_pdf(df)
+    filename = f"attention_report_{datetime.now():%Y%m%d_%H%M}.pdf"
+    st.download_button("Download PDF report", pdf, file_name=filename, mime="application/pdf")
+    if BUCKET_NAME and st.button("Upload report to S3"):
         try:
-            os.makedirs("reports", exist_ok=True)
-            filename = os.path.join("reports", f"attention_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf")
-            doc = SimpleDocTemplate(filename, pagesize=letter)
-            styles = getSampleStyleSheet()
-            story = []
-
-            story.append(Paragraph("Attention Monitoring Session Report", styles['Title']))
-            story.append(Spacer(1, 12))
-            story.append(Paragraph(f"Generated on: {datetime.now()}", styles['Normal']))
-            story.append(Spacer(1, 24))
-
-            # Summary Table
-            data = [["Student ID", "Avg Attention", "Min Attention", "Max Attention"]]
-            for student in df['student_id'].unique():
-                student_data = df[df['student_id'] == student]
-                data.append([
-                    student,
-                    f"{student_data['attention_score'].mean():.1f}%",
-                    f"{student_data['attention_score'].min()}%",
-                    f"{student_data['attention_score'].max()}%"
-                ])
-
-            table = Table(data)
-            table.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.black)]))
-            story.append(table)
-
-            doc.build(story)
-
-            if s3_client:
-                s3_client.upload_file(filename, BUCKET_NAME, os.path.basename(filename))
-                st.success(f"✅ Report uploaded to S3: {os.path.basename(filename)}")
-            else:
-                st.success(f"✅ Report saved locally: {filename}")
+            get_s3_client().put_object(Bucket=BUCKET_NAME, Key=filename, Body=pdf)
+            st.success(f"Report uploaded to s3://{BUCKET_NAME}/{filename}")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Upload failed ({type(e).__name__}).")
 
-st.dataframe(df.head(15), use_container_width=True)
+
+if auto_refresh:
+    st.fragment(live_view, run_every=5)()
+else:
+    live_view()
