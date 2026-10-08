@@ -1,8 +1,8 @@
+import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from sqlalchemy import create_engine
-import time
 from datetime import datetime
 import boto3
 from reportlab.lib import colors
@@ -13,12 +13,16 @@ from reportlab.lib.styles import getSampleStyleSheet
 st.set_page_config(page_title="Attention Dashboard", layout="wide")
 st.title("📊 Computer Vision Attention Monitoring System")
 
-# RDS Connection
-engine = create_engine("postgresql://REDACTED_USER:REDACTED_PASSWORD@REDACTED_RDS_HOST/attentiondb")
+# Configuration comes from environment variables (see .env.example)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    st.error("DATABASE_URL is not set. Copy .env.example to .env and configure it.")
+    st.stop()
+engine = create_engine(DATABASE_URL)
 
-# S3 Client
-s3_client = boto3.client('s3')
-BUCKET_NAME = "REDACTED_BUCKET"   # Change if your bucket name is different
+# S3 Client (optional: report upload is disabled when S3_BUCKET is unset)
+BUCKET_NAME = os.environ.get("S3_BUCKET")
+s3_client = boto3.client('s3') if BUCKET_NAME else None
 
 if st.button("🔄 Refresh Data"):
     st.rerun()
@@ -41,10 +45,11 @@ fig = px.line(df, x='timestamp', y='attention_score', color='student_id', title=
 st.plotly_chart(fig, use_container_width=True)
 
 # Generate Report Button
-if st.button("📄 Generate & Upload PDF Report to S3"):
+if st.button("📄 Generate PDF Report" + (" & Upload to S3" if s3_client else "")):
     with st.spinner("Generating PDF and uploading to S3..."):
         try:
-            filename = f"attention_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            os.makedirs("reports", exist_ok=True)
+            filename = os.path.join("reports", f"attention_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf")
             doc = SimpleDocTemplate(filename, pagesize=letter)
             styles = getSampleStyleSheet()
             story = []
@@ -71,9 +76,11 @@ if st.button("📄 Generate & Upload PDF Report to S3"):
 
             doc.build(story)
 
-            # Upload to S3
-            s3_client.upload_file(filename, BUCKET_NAME, filename)
-            st.success(f"✅ Report uploaded to S3: {filename}")
+            if s3_client:
+                s3_client.upload_file(filename, BUCKET_NAME, os.path.basename(filename))
+                st.success(f"✅ Report uploaded to S3: {os.path.basename(filename)}")
+            else:
+                st.success(f"✅ Report saved locally: {filename}")
         except Exception as e:
             st.error(f"Error: {e}")
 
