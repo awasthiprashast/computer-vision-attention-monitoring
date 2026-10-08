@@ -9,9 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scoring import (  # noqa: E402
     LEFT_EYE,
     RIGHT_EYE,
+    Calibration,
+    Calibrator,
     ScoreSmoother,
     calculate_ear,
     estimate_yaw,
+    eye_score,
+    measure,
     raw_attention_score,
     score_frame,
 )
@@ -82,3 +86,75 @@ def test_score_frame_end_to_end():
     assert 0 <= score <= 100
     assert ear == pytest.approx(0.6, abs=0.01)
     assert yaw == 0.0
+
+
+# ---- calibration ----
+
+
+def test_calibrator_not_done_until_enough_frames():
+    c = Calibrator(frames=10)
+    for _ in range(9):
+        c.add(0.14, 0.0)
+    assert not c.done and c.result() is None
+    assert c.progress == pytest.approx(0.9)
+    c.add(0.14, 0.0)
+    assert c.done and c.progress == 1.0
+
+
+def test_calibrator_median_ignores_blinks_and_glances():
+    c = Calibrator(frames=11)
+    for ear in [0.30] * 8 + [0.02, 0.03, 0.02]:      # three blink frames
+        c.add(ear, 0.0)
+    result = c.result()
+    assert result.ear_baseline == pytest.approx(0.30)
+
+
+def test_calibrator_records_neutral_head_position():
+    c = Calibrator(frames=5)
+    for yaw in (8.0, 8.5, 9.0, 8.0, 40.0):           # one glance away
+        c.add(0.28, yaw)
+    assert c.result().yaw_offset == pytest.approx(8.5)
+
+
+@pytest.mark.parametrize("ear", [0.02, 0.9])
+def test_calibrator_rejects_implausible_baseline(ear):
+    c = Calibrator(frames=5)
+    for _ in range(5):
+        c.add(ear, 0.0)
+    assert c.done and c.result() is None
+
+
+def test_calibrator_ignores_extra_samples_once_done():
+    c = Calibrator(frames=3)
+    for ear in (0.3, 0.3, 0.3, 0.05, 0.05):
+        c.add(ear, 0.0)
+    assert c.result().ear_baseline == pytest.approx(0.3)
+
+
+def test_eye_score_is_relative_to_baseline():
+    cal = Calibration(ear_baseline=0.14, yaw_offset=0.0)
+    assert eye_score(0.14, cal) == 100            # your normal open eyes
+    assert eye_score(0.07, cal) == 50             # half closed
+    assert eye_score(0.30, cal) == 100            # clamped
+    assert eye_score(0.0, cal) == 0
+    assert eye_score(0.14) == 35                  # without calibration the same eyes score low
+
+
+def test_calibrated_score_for_a_low_ear_user():
+    cal = Calibration(ear_baseline=0.14, yaw_offset=0.0)
+    assert raw_attention_score(0.14, 0, cal) == 100
+    assert raw_attention_score(0.14, 0) == 54     # uncalibrated: the same eyes score about half
+
+
+def test_yaw_is_measured_from_calibrated_neutral():
+    cal = Calibration(ear_baseline=0.3, yaw_offset=20.0)   # sits well off-centre
+    _, yaw = measure(face(nose_x=0.7), 1000, 1000, cal)
+    assert yaw == pytest.approx(0.0)
+    _, uncalibrated = measure(face(nose_x=0.7), 1000, 1000)
+    assert uncalibrated == pytest.approx(20.0)
+
+
+def test_score_frame_uses_calibration():
+    cal = Calibration(ear_baseline=0.6, yaw_offset=0.0)
+    score, _, _ = score_frame(face(eye_open=0.06), 1000, 1000, ScoreSmoother(), cal)
+    assert score == 100
